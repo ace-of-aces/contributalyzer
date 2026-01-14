@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Spectrum Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        h1 {
+            color: #c9d1d9;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .start-btn {
+            background-color: #238636;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .start-btn:hover {
+            background-color: #2ea043;
+        }
+
+        .start-btn:disabled {
+            background-color: #238636;
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .analyzer-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .hz-labels {
+            display: flex;
+            margin-left: 40px;
+            gap: 3px;
+        }
+
+        .hz-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-align: center;
+        }
+
+        .main-grid {
+            display: flex;
+            gap: 8px;
+        }
+
+        .db-labels {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2px 0;
+            text-align: right;
+            min-width: 32px;
+        }
+
+        .db-label {
+            font-size: 12px;
+            color: #8b949e;
+            height: 13px;
+            line-height: 13px;
+        }
+
+        .grid {
+            display: flex;
+            gap: 3px;
+        }
+
+        .column {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .cell {
+            width: 13px;
+            height: 13px;
+            background-color: #161b22;
+            border-radius: 2px;
+            transition: background-color 0.05s ease;
+        }
+
+        .cell.level-1 {
+            background-color: #0e4429;
+        }
+
+        .cell.level-2 {
+            background-color: #006d32;
+        }
+
+        .cell.level-3 {
+            background-color: #26a641;
+        }
+
+        .cell.level-4 {
+            background-color: #39d353;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+            margin-left: 40px;
+            width: calc(100% - 40px);
+        }
+
+        .info-text {
+            color: #8b949e;
+            font-size: 12px;
+        }
+
+        .legend {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .legend-cell {
+            width: 13px;
+            height: 13px;
+            border-radius: 2px;
+        }
+
+        .legend-cell.empty {
+            background-color: #161b22;
+        }
+
+        .legend-cell.l1 {
+            background-color: #0e4429;
+        }
+
+        .legend-cell.l2 {
+            background-color: #006d32;
+        }
+
+        .legend-cell.l3 {
+            background-color: #26a641;
+        }
+
+        .legend-cell.l4 {
+            background-color: #39d353;
+        }
+
+        .status {
+            color: #8b949e;
+            font-size: 12px;
+            min-height: 18px;
+        }
+
+        .status.error {
+            color: #f85149;
+        }
+
+        .status.active {
+            color: #39d353;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Spectrum Analyzer</h1>
+        <button class="start-btn" id="startBtn">Start Microphone</button>
+        <p class="status" id="status"></p>
+        
+        <div class="analyzer-wrapper">
+            <div class="hz-labels" id="hzLabels"></div>
+            <div class="main-grid">
+                <div class="db-labels" id="dbLabels"></div>
+                <div class="grid" id="grid"></div>
+            </div>
+            <div class="footer">
+                <span class="info-text">Real-time frequency spectrum from microphone</span>
+                <div class="legend">
+                    <span>Less</span>
+                    <div class="legend-cell empty"></div>
+                    <div class="legend-cell l1"></div>
+                    <div class="legend-cell l2"></div>
+                    <div class="legend-cell l3"></div>
+                    <div class="legend-cell l4"></div>
+                    <span>More</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const NUM_COLUMNS = 52;
+        const NUM_ROWS = 7;
+        const MIN_FREQ = 60;
+        const MAX_FREQ = 16000;
+        const FFT_SIZE = 2048;
+
+        // Audio context and analyser
+        let audioContext = null;
+        let analyser = null;
+        let dataArray = null;
+        let animationId = null;
+        let isRunning = false;
+
+        // DOM elements
+        const grid = document.getElementById('grid');
+        const hzLabels = document.getElementById('hzLabels');
+        const dbLabels = document.getElementById('dbLabels');
+        const startBtn = document.getElementById('startBtn');
+        const status = document.getElementById('status');
+
+        // Store cell references for fast updates
+        const cells = [];
+
+        // Calculate logarithmic frequency bands
+        function getFrequencyBands() {
+            const bands = [];
+            const logMin = Math.log10(MIN_FREQ);
+            const logMax = Math.log10(MAX_FREQ);
+            const logStep = (logMax - logMin) / NUM_COLUMNS;
+
+            for (let i = 0; i < NUM_COLUMNS; i++) {
+                const freqStart = Math.pow(10, logMin + i * logStep);
+                const freqEnd = Math.pow(10, logMin + (i + 1) * logStep);
+                bands.push({
+                    start: freqStart,
+                    end: freqEnd,
+                    center: Math.sqrt(freqStart * freqEnd)
+                });
+            }
+            return bands;
+        }
+
+        const frequencyBands = getFrequencyBands();
+
+        // Format frequency for display
+        function formatFreq(freq) {
+            if (freq >= 1000) {
+                return (freq / 1000).toFixed(freq >= 10000 ? 0 : 1) + 'k';
+            }
+            return Math.round(freq).toString();
+        }
+
+        // Initialize the grid
+        function initGrid() {
+            // Create Hz labels
+            const labelIndices = [0, 10, 20, 30, 40, 51];
+            let currentLabelIndex = 0;
+
+            for (let col = 0; col < NUM_COLUMNS; col++) {
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'hz-label';
+                labelDiv.style.width = '13px';
+
+                if (labelIndices.includes(col)) {
+                    labelDiv.textContent = formatFreq(frequencyBands[col].center);
+                    labelDiv.style.width = 'auto';
+                    labelDiv.style.minWidth = '13px';
+                    labelDiv.style.marginLeft = col === 0 ? '0' : '-10px';
+                    labelDiv.style.marginRight = col === 51 ? '0' : '-10px';
+                }
+
+                hzLabels.appendChild(labelDiv);
+            }
+
+            // Create dB labels (top to bottom: 0dB to -60dB)
+            const dbValues = ['0dB', '-10', '-20', '-30', '-40', '-50', '-60'];
+            for (let row = 0; row < NUM_ROWS; row++) {
+                const label = document.createElement('div');
+                label.className = 'db-label';
+                label.textContent = dbValues[row];
+                dbLabels.appendChild(label);
+            }
+
+            // Create grid cells
+            for (let col = 0; col < NUM_COLUMNS; col++) {
+                const column = document.createElement('div');
+                column.className = 'column';
+                cells[col] = [];
+
+                for (let row = 0; row < NUM_ROWS; row++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    column.appendChild(cell);
+                    cells[col][row] = cell;
+                }
+
+                grid.appendChild(column);
+            }
+        }
+
+        // Get amplitude for a frequency band
+        function getAmplitudeForBand(band, freqData, sampleRate) {
+            const nyquist = sampleRate / 2;
+            const binCount = freqData.length;
+            const binWidth = nyquist / binCount;
+
+            const startBin = Math.floor(band.start / binWidth);
+            const endBin = Math.min(Math.ceil(band.end / binWidth), binCount - 1);
+
+            if (startBin >= binCount) return 0;
+
+            let sum = 0;
+            let count = 0;
+
+            for (let i = startBin; i <= endBin; i++) {
+                sum += freqData[i];
+                count++;
+            }
+
+            return count > 0 ? sum / count : 0;
+        }
+
+        // Update grid based on frequency data
+        function updateGrid() {
+            if (!analyser || !dataArray) return;
+
+            analyser.getByteFrequencyData(dataArray);
+            const sampleRate = audioContext.sampleRate;
+
+            for (let col = 0; col < NUM_COLUMNS; col++) {
+                const amplitude = getAmplitudeForBand(frequencyBands[col], dataArray, sampleRate);
+                
+                // Amplitude is 0-255, map to number of lit cells (0 to NUM_ROWS)
+                // We fill from bottom (row 6) to top (row 0)
+                const normalizedAmp = amplitude / 255;
+                const litCells = Math.round(normalizedAmp * NUM_ROWS);
+
+                for (let row = 0; row < NUM_ROWS; row++) {
+                    const cell = cells[col][row];
+                    // Row 0 is top (0dB), row 6 is bottom (-60dB)
+                    // If litCells is 3, we light rows 4, 5, 6 (bottom 3)
+                    const rowFromBottom = NUM_ROWS - 1 - row;
+                    
+                    // Remove all level classes
+                    cell.className = 'cell';
+
+                    if (rowFromBottom < litCells) {
+                        // Determine intensity based on how close to the peak
+                        const intensity = normalizedAmp;
+                        if (intensity > 0.75) {
+                            cell.classList.add('level-4');
+                        } else if (intensity > 0.5) {
+                            cell.classList.add('level-3');
+                        } else if (intensity > 0.25) {
+                            cell.classList.add('level-2');
+                        } else {
+                            cell.classList.add('level-1');
+                        }
+                    }
+                }
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            updateGrid();
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Start audio capture
+        async function startAudio() {
+            try {
+                startBtn.disabled = true;
+                status.textContent = 'Requesting microphone access...';
+                status.className = 'status';
+
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = FFT_SIZE;
+                analyser.smoothingTimeConstant = 0.4;
+
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                isRunning = true;
+                startBtn.textContent = 'Stop';
+                startBtn.disabled = false;
+                status.textContent = 'Listening...';
+                status.className = 'status active';
+
+                animate();
+
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                status.textContent = 'Error: ' + (err.message || 'Could not access microphone');
+                status.className = 'status error';
+                startBtn.disabled = false;
+            }
+        }
+
+        // Stop audio capture
+        function stopAudio() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            analyser = null;
+            dataArray = null;
+            isRunning = false;
+
+            // Clear the grid
+            for (let col = 0; col < NUM_COLUMNS; col++) {
+                for (let row = 0; row < NUM_ROWS; row++) {
+                    cells[col][row].className = 'cell';
+                }
+            }
+
+            startBtn.textContent = 'Start Microphone';
+            status.textContent = '';
+            status.className = 'status';
+        }
+
+        // Button click handler
+        startBtn.addEventListener('click', () => {
+            if (isRunning) {
+                stopAudio();
+            } else {
+                startAudio();
+            }
+        });
+
+        // Initialize
+        initGrid();
+    </script>
+</body>
+</html>
